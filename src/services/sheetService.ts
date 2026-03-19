@@ -11,6 +11,7 @@ export interface RubberData {
 }
 
 export interface RecipeItem {
+  rubberName: string;
   name: string;
   code: string;
   weight: string;
@@ -46,7 +47,7 @@ export async function fetchRubberData(): Promise<RubberData[]> {
   });
 }
 
-export async function fetchRecipeData(rubberName: string): Promise<RecipeItem[]> {
+export async function fetchRecipeData(query: string): Promise<RecipeItem[]> {
   return new Promise((resolve, reject) => {
     Papa.parse(RECIPE_URL, {
       download: true,
@@ -61,29 +62,58 @@ export async function fetchRecipeData(rubberName: string): Promise<RecipeItem[]>
 
         const materialNames = rows[1];
         const materialCodes = rows[2];
+        const q = query.trim().toUpperCase();
         
-        // Find the matching row: Column C (index 2) matches rubberName, and Column A (index 0) is 'V' or 'Ⅴ'
-        const targetRow = rows.find(row => {
-          const isV = row[0] === 'V' || row[0] === 'Ⅴ' || row[0] === 'v';
-          const isMatch = row[2]?.trim().toUpperCase() === rubberName.toUpperCase();
-          return isV && isMatch;
-        });
-
-        if (!targetRow) {
-          resolve([]);
-          return;
+        // Find all columns that match the query (for reverse search)
+        const matchingColIndices: number[] = [];
+        for (let i = 5; i < materialNames.length; i++) {
+          const mName = (materialNames[i] || '').toUpperCase();
+          const mCode = (materialCodes[i] || '').toUpperCase();
+          if (mName.includes(q) || mCode.includes(q)) {
+            matchingColIndices.push(i);
+          }
         }
 
         const recipeItems: RecipeItem[] = [];
-        // Data starts from column F (index 5)
-        for (let i = 5; i < targetRow.length; i++) {
-          const weight = targetRow[i]?.trim();
-          if (weight && weight !== '' && weight !== '0') {
-            recipeItems.push({
-              name: materialNames[i]?.trim() || 'Unknown',
-              code: materialCodes[i]?.trim() || 'Unknown',
-              weight: weight
-            });
+
+        // Iterate through all valid rows (Rubber Compounds)
+        for (let r = 3; r < rows.length; r++) {
+          const row = rows[r];
+          const isV = row[0] === 'V' || row[0] === 'Ⅴ' || row[0] === 'v';
+          if (!isV) continue;
+
+          const rubberName = (row[2] || '').trim();
+          const rubberNameUpper = rubberName.toUpperCase();
+          
+          const isRubberMatch = rubberNameUpper.includes(q);
+
+          // If the rubber compound matches the query, include ALL its materials
+          if (isRubberMatch) {
+            for (let i = 5; i < row.length; i++) {
+              const weight = row[i]?.trim();
+              if (weight && weight !== '' && weight !== '0') {
+                recipeItems.push({
+                  rubberName: rubberName,
+                  name: materialNames[i]?.trim() || 'Unknown',
+                  code: materialCodes[i]?.trim() || 'Unknown',
+                  weight: weight
+                });
+              }
+            }
+          } else if (matchingColIndices.length > 0) {
+            // If the rubber compound doesn't match, but some materials match the query,
+            // include only the matching materials for this rubber compound
+            for (const i of matchingColIndices) {
+              const weight = row[i]?.trim();
+              if (weight && weight !== '' && weight !== '0') {
+                recipeItems.push({
+                  rubberName: rubberName,
+                  name: materialNames[i]?.trim() || 'Unknown',
+                  code: materialCodes[i]?.trim() || 'Unknown',
+                  weight: weight
+                });
+              }
+            }
           }
         }
 
